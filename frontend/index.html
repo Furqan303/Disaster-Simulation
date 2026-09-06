@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DisasterSim — Training Dashboard</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- MapLibre GL JS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <!-- Turf.js — geospatial calculations -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+
+  <!-- MapLibre Geoman -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/maplibre-geoman-free@2/dist/maplibre-geoman.css"
+        onerror="this.remove()" />
+  <script src="https://cdn.jsdelivr.net/npm/@geoman-io/maplibre-geoman-free@2/dist/maplibre-geoman.min.js"
+          onerror="console.warn('[DisasterSim] Geoman CDN unavailable — custom draw tools active')"></script>
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══════════════════════════════════════════════
+       LEFT PANEL — Timeline & Simulation Controls
+       ═══════════════════════════════════════════════ -->
+  <aside id="timeline-panel" class="panel">
+
+    <div class="panel-header">
+      <span class="panel-icon">⏱️</span>
+      <h2>Timeline</h2>
+    </div>
+
+    <!-- Time display -->
+    <div class="time-display">
+      <span class="time-value" id="current-time-value">0</span>
+      <span class="time-unit">min</span>
+    </div>
+
+    <!-- Vertical slider + tick marks -->
+    <div class="slider-wrapper">
+      <div class="tick-track">
+        <span class="tick-label" style="top:0%">60m</span>
+        <span class="tick-label" style="top:25%">45m</span>
+        <span class="tick-label" style="top:50%">30m</span>
+        <span class="tick-label" style="top:75%">15m</span>
+        <span class="tick-label" style="top:100%">0m</span>
+      </div>
+      <input type="range" id="timeline-slider"
+             min="0" max="60" step="1" value="0"
+             orient="vertical" />
+    </div>
+
+    <!-- Playback controls -->
+    <div class="playback-controls">
+      <button id="play-btn" class="icon-btn" title="Play / Pause">
+        <span id="play-icon">▶</span>
+      </button>
+    </div>
+
+    <!-- Simulation parameters -->
+    <div class="section">
+      <h3 class="section-title">Simulation</h3>
+      <label class="control-label">
+        <span>Wind Speed (m/min)</span>
+        <input type="number" id="wind-speed" class="control-input" value="50" min="1" max="200" />
+      </label>
+      <label class="control-label">
+        <span>Wind Dir (°)</span>
+        <input type="number" id="wind-dir" class="control-input" value="45" min="0" max="360" />
+      </label>
+      <label class="control-label">
+        <span>Spill Lon</span>
+        <input type="number" id="spill-lon" class="control-input" value="73.0479" step="0.0001" />
+      </label>
+      <label class="control-label">
+        <span>Spill Lat</span>
+        <input type="number" id="spill-lat" class="control-input" value="33.6844" step="0.0001" />
+      </label>
+      <button id="run-sim-btn" class="btn btn-primary"> Simulation</button>
+    </div>
+
+    <!-- Evacuation route -->
+    <div class="section">
+      <h3 class="section-title">Evacuation Route</h3>
+      <button id="set-origin-btn" class="btn btn-outline"> Set Origin</button>
+      <button id="set-dest-btn"   class="btn btn-outline"> Set Destination</button>
+      <div class="search-container">
+        <input type="text" id="dest-search" class="control-input search-input"
+               placeholder="🔍 Search destination..." autocomplete="off" />
+        <div id="search-results" class="search-results"></div>
+      </div>
+      <button id="compute-route-btn" class="btn btn-success">  Compute Route</button>
+      <div id="origin-display"  class="coord-display">Origin: <em>click map</em></div>
+      <div id="dest-display"    class="coord-display">Dest: <em>click map</em></div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════
+       CENTER — MapLibre GL Map
+       ═══════════════════════════════════════════════ -->
+  <main id="map-container">
+    <div id="map"></div>
+
+    <!-- Draw toolbar (right side of map) -->
+    <div id="draw-toolbar">
+      <div class="toolbar-header">✏️ Tools</div>
+
+      <button class="tool-btn" data-tool="polygon" title="Draw Evacuation Zone">
+        <span class="tool-icon">⬡</span>
+        <span class="tool-label">Evac Zone</span>
+      </button>
+
+      <button class="tool-btn" data-tool="point" title="Place Triage Pin">
+        <span class="tool-icon">📌</span>
+        <span class="tool-label">Triage Pin</span>
+      </button>
+
+      <button class="tool-btn" data-tool="line" title="Draw Roadblock Line">
+        <span class="tool-icon">🚧</span>
+        <span class="tool-label">Roadblock</span>
+      </button>
+
+      <div class="toolbar-divider"></div>
+
+      <button class="tool-btn tool-btn-danger" data-tool="delete" title="Click a feature to delete">
+        <span class="tool-icon">🗑️</span>
+        <span class="tool-label">Delete</span>
+      </button>
+
+      <button class="tool-btn tool-btn-danger" data-tool="clear" title="Remove all drawn features">
+        <span class="tool-icon">✖</span>
+        <span class="tool-label">Clear All</span>
+      </button>
+    </div>
+
+    <!-- Map status bar -->
+    <div id="map-status">
+      <span id="map-coords">33.6844°N, 73.0479°E</span>
+      <span id="map-zoom">Z: 12</span>
+      <span id="draw-hint"></span>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════
+       RIGHT PANEL — Real-Time Analytics
+       ═══════════════════════════════════════════════ -->
+  <aside id="analytics-panel" class="panel">
+
+    <div class="panel-header">
+      <span class="panel-icon">📊</span>
+      <h2>Real-Time Analytics</h2>
+    </div>
+
+    <div class="metrics-grid">
+
+      <!-- Citizens at risk -->
+      <div class="metric-card severity-critical">
+        <div class="metric-header">
+          <span class="metric-icon">⚠️ Population Vulnerable</span>
+          <span class="metric-trend" id="pop-trend"></span>
+        </div>
+        <div class="metric-value mono" id="pop-at-risk">0</div>
+        <div class="metric-label">Citizens in Hazard Path</div>
+        <div class="metric-bar"><div class="metric-bar-fill" id="pop-bar"></div></div>
+      </div>
+
+      <!-- Clearance time -->
+      <div class="metric-card severity-warning">
+        <div class="metric-header"><span class="metric-icon">⏱️ Clearance Time</span></div>
+        <div class="metric-value mono" id="clearance-time">— min</div>
+        <div class="metric-label">Est.</div>
+      </div>
+
+      <!-- Roadblocks -->
+      <div class="metric-card severity-info">
+        <div class="metric-header"><span class="metric-icon">🚧 Roadblocks</span></div>
+        <div class="metric-value mono" id="roadblock-count">0</div>
+        <div class="metric-label">Active</div>
+      </div>
+
+      <!-- Evac zones -->
+      <div class="metric-card">
+        <div class="metric-header"><span class="metric-icon">🏗️ Evacuation Zones</span></div>
+        <div class="metric-value mono" id="evac-zone-count">0</div>
+        <div class="metric-sub mono" id="evac-zone-area">0.00 km²</div>
+      </div>
+
+      <!-- Triage points -->
+      <div class="metric-card">
+        <div class="metric-header"><span class="metric-icon">🏥 Triage Points</span></div>
+        <div class="metric-value mono" id="triage-total">0</div>
+        <div class="triage-breakdown">
+          <div class="triage-item"><span class="triage-dot dot-red"></span>    <span class="mono" id="triage-red">0</span>    <span>Critical</span></div>
+          <div class="triage-item"><span class="triage-dot dot-yellow"></span> <span class="mono" id="triage-yellow">0</span> <span>Urgent</span></div>
+          <div class="triage-item"><span class="triage-dot dot-green"></span>  <span class="mono" id="triage-green">0</span>  <span>Minor</span></div>
+        </div>
+      </div>
+
+      <!-- Route status -->
+      <div class="metric-card" id="route-card">
+        <div class="metric-header"><span class="metric-icon">🛣️ Route Status</span></div>
+        <div class="metric-value" id="route-status">No Route</div>
+      </div>
+    </div>
+
+  </aside>
+
+</div>
+
+<!-- ── Application Scripts ── -->
+<script src="/static/timeline.js"></script>
+<script src="/static/hazard-layer.js"></script>
+<script src="/static/draw-tools.js"></script>
+<script src="/static/demographics-layer.js"></script>
+<script src="/static/analytics.js"></script>
+<script src="/static/geocoder.js"></script>
+<script src="/static/app.js"></script>
+
+</body>
+</html>
